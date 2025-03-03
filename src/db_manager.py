@@ -1,5 +1,3 @@
-from unittest import result
-
 import psycopg2
 from psycopg2.extensions import connection
 from typing import List, Dict, Any, Optional
@@ -9,7 +7,12 @@ class DBManager:
 
     def __init__(self, dsn: str) -> None:
         """ Инициализация соединения с базой данных """
-        self.connection = psycopg2.connect(dsn)
+        self.connection = psycopg2.connect(
+            dbname="test_vacancy_db",
+            user="postgres",
+            password="secret",
+            host="localhost"
+        )
         self.connection.autocommit = True
 
     def create_tables(self) -> None:
