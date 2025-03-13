@@ -1,86 +1,62 @@
-import os
+from src.database import create_database, create_tables
+from src.data_filler import fill_employers_table
 from src.db_manager import DBManager
-from src import api
-from src import vacancy_manager
-
-
-# Получение DSN для подключения к PostgreSQL из переменной окружения или использование дефолтного значения
-DSN = os.getenv('DARABASE_URL', "dbname=vacancy_db user=postgres password=secret host=localhost")
-
-def insert_company(db: DBManager, employer_id: int, name:str) -> int:
-    """ Добавление записи компании в таблицу companies
-    Если запись существует, то возвращает существующий id """
-    with db.connection.cursor() as cursor:
-        cursor.execute("""
-            INSERT INTO companies (employer_id, name)
-            VALUES (%s, %s)
-            ON CONFLICT (employer_id) DO NOTHING
-            RETURNING id;
-        """, (employer_id, name))
-        result = cursor.fetchone()
-        if result:
-            return result[0]
-        else:
-            # Получаем id компании, если уже существует
-            cursor.execute("SELECT id FROM companies WHERE employer_id = %s", (employer_id,))
-            return cursor.fetchone()[0]
-
-def insert_vacancies(db: DBManager, company_id: int, vacancies: list) -> None:
-    """ Вставка списка вакансий для заданной компании """
-    with db.connection.cursor() as cursor:
-        for vacancy in vacancies:
-            cursor.execute("""
-                            INSERT INTO vacancies (company_id, title, salary_from, salary_to, url)
-                            VALUES (%s, %s, %s, %s, %s)
-                            ON CONFLICT DO NOTHING;
-                        """, (
-                company_id,
-                vacancy['title'],
-                vacancy['salary_from'],
-                vacancy['salary_to'],
-                vacancy['url']
-            ))
 
 def main():
-    # Инициализация DBManager и создание таблиц в БД
-    db = DBManager(DSN)
-    db.create_tables()
+    database_name = 'hh_vacancies'
+    employer_ids = ['15478', '23427', '3529', '1740', '78638', '2748', '3776', '4181', '3127', '2180']
 
-    # Список выбранных работодателей (employer_id)
-    employer_ids = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    # Создание и заполнение базы данных
+    create_database(database_name)
+    create_tables(database_name)
+    fill_employers_table(database_name, employer_ids)
 
-    for employer_id in employer_ids:
-        employer_data = api.get_employer_data(employer_id)
-        if not employer_data:
-            print(f"Не удалось получить данные для employer_id {employer_id}")
-            continue
+    # Работа с базой данных через DBManager
+    db_manager = DBManager(database_name)
 
-        company_name = employer_data.get("name")
-        company_id = insert_company(db, employer_id, company_name)
+    # Вывод списка компаний и количества вакансий
+    print("Список компаний и количество вакансий:")
+    for company, count in db_manager.get_companies_and_vacancies_count():
+        print(f"{company}: {count} вакансий")
 
-        # Получение вакансий, обработка их и сохранение в БД
-        raw_vacancies = api.get_all_vacancies(employer_id)
-        processed_vacancies = vacancy_manager.process_vacancies(raw_vacancies)
-        insert_vacancies(db, company_id, processed_vacancies)
-        print(f"Обработаны данные для компании: {company_name}")
+    # Вывод списка всех вакансий
+    print("\nСписок всех вакансий:")
+    for company, title, salary_from, salary_to, url in db_manager.get_all_vacancies():
+        print(f"Компания: {company}, Вакансия: {title}, Зарплата: {salary_from}-{salary_to}, Ссылка: {url}")
 
-    # Демонстрация работы методов DBManager
-    companies_vacancies = db.get_companies_and_vacancies_count()
-    print("\nКомпании и количество вакансий:")
-    for company in companies_vacancies:
-        print(f"{company['company']}: {company['vacancies_count']} вакансий")
+    # Вывод средней зарплаты
+    avg_salary = db_manager.get_avg_salary()
+    if avg_salary is not None:
+        print(f"\nСредняя зарплата по всем вакансиям: {avg_salary:.2f}")
+    else:
+        print("\nНевозможно рассчитать среднюю зарплату: данные отсутствуют.")
 
-    avg_salary = db.get_avg_salary()
-    print(f"\тСредняя зарплата по вакансиям: {avg_salary}")
+    # Поиск вакансий с зарплатой выше средней
+    print("\nВакансии с зарплатой выше средней:")
+    for vacancy in db_manager.get_vacancies_with_higher_salary():
+        print(f"Вакансия: {vacancy[2]}, Зарплата: {vacancy[3]}-{vacancy[4]}")
 
-    keyword = input("\nВведите ключевое слово для поиска вакансий: ")
-    vacancies_with_keyword = db.get_vacancies_with_keyword(keyword)
-    print(f"\nВакансии, содержащие слово '{keyword}':")
-    for vac in vacancies_with_keyword:
-        print(f"{vac['company']} - {vac['title']} (з/п: {vac['salary_from']} - {vac['salary_to']}) {vac['url']}")
+    # Поиск вакансий по ключевому слову
+    keyword = input("\nВведите ключевое слово для поиска вакансий (например, 'python'): ")
+    print(f"\nВакансии с ключевым словом '{keyword}':")
+    for vacancy in db_manager.get_vacancies_with_keyword(keyword):
+        print(f"Вакансия: {vacancy[2]}, Ссылка: {vacancy[5]}")
 
-    db.close()
+    # Поиск вакансий по желаемой зарплате и ключевому слову
+    try:
+        desired_salary = int(input("\nВведите желаемую зарплату: "))
+        desired_keyword = input("Введите ключевое слово для поиска вакансий: ")
+        print(f"\nВакансии с зарплатой от {desired_salary} и ключевым словом '{desired_keyword}':")
+        vacancies = db_manager.get_vacancies_by_salary_and_keyword(desired_salary, desired_keyword)
+        if vacancies:
+            for company, title, salary_from, salary_to, url in vacancies:
+                print(f"Компания: {company}, Вакансия: {title}, Зарплата: {salary_from}-{salary_to}, Ссылка: {url}")
+        else:
+            print("Нет подходящих вакансий.")
+    except ValueError:
+        print("Ошибка: введите корректное число для зарплаты.")
 
-if __name__ == '__main__':
+    db_manager.close()
+
+if __name__ == "__main__":
     main()
-

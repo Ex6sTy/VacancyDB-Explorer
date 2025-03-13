@@ -1,58 +1,21 @@
-from src import api
+import pytest
+from src.api import get_employer_data, get_vacancies_data
 
-class DummyResponse:
-    def __init__(self, json_data, status_code=200):
-        self._json = json_data
-        self.status_code = status_code
-
-    def raise_for_status(self):
-        if self.status_code != 200:
-            raise Exception("Error")
-
-    def json(self):
-        return self._json
-
-def dummy_get_employer(url, *args, **kwargs):
-    # Имитируем ответ для запроса данных работодателя
-    if "employers" in url:
-        return DummyResponse({"name": "Test Company", "id": 123}, 200)
-    raise Exception("Invalid URL")
-
-def dummy_get_vacancies(url, params, *args, **kwargs):
-    # Имитируем пагинацию вакансий
-    if "vacancies" in url:
-        page = params.get("page", 0)
-        if page == 0:
-            # Первая страница содержит 1 вакансию, и общее число страниц = 2
-            return DummyResponse({"items": [{
-                "name": "Developer",
-                "alternate_url": "http://example.com/vacancy/1",
-                "salary": {"from": 1000, "to": 2000}
-            }], "pages": 2})
-        else:
-            # Вторая страница с одной вакансией
-            return DummyResponse({"items": [{
-                "name": "Tester",
-                "alternate_url": "http://example.com/vacancy/2",
-                "salary": None
-            }], "pages": 2})
-    raise Exception("Invalid URL")
-
-def test_get_employer_data(monkeypatch):
-    """
-    Тестирует функцию получения данных работодателя.
-    """
-    monkeypatch.setattr(api.requests, "get", lambda url, *args, **kwargs: dummy_get_employer(url, *args, **kwargs))
-    data = api.get_employer_data(123)
+def test_get_employer_data():
+    # Проверяем, что функция возвращает данные для существующего работодателя
+    employer_id = '15478'  # Пример ID работодателя (Ростелеком)
+    data = get_employer_data(employer_id)
     assert data is not None
-    assert data["name"] == "Test Company"
+    assert 'name' in data
+    assert 'description' in data
+    assert 'site_url' in data
 
-def test_get_all_vacancies(monkeypatch):
-    """
-    Тестирует функцию получения всех вакансий с имитацией пагинации.
-    """
-    monkeypatch.setattr(api.requests, "get", lambda url, **kwargs: dummy_get_vacancies(url, kwargs.get("params", {})))
-    vacancies = api.get_all_vacancies(123)
-    # Ожидаем 2 вакансии (с двух страниц)
-    assert isinstance(vacancies, list)
-    assert len(vacancies) == 2
+def test_get_vacancies_data():
+    # Проверяем, что функция возвращает данные о вакансиях
+    employer_id = '15478'  # Пример ID работодателя (Ростелеком)
+    data = get_vacancies_data(employer_id)
+    assert data is not None
+    assert isinstance(data, list)
+    if len(data) > 0:
+        assert 'name' in data[0]  # Название вакансии
+        assert 'salary' in data[0]  # Зарплата

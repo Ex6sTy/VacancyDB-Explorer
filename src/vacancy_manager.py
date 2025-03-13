@@ -2,7 +2,7 @@ from typing import Dict, Any, List
 
 
 def parse_vacancy(vacancy: Dict[str, Any]) -> Dict[str, Any]:
-    """ Преобразование данных вакансий из API в формат, пригодный для записи в базу данных """
+    """Преобразование данных вакансий из API в формат, пригодный для записи в базу данных"""
     title = vacancy.get("name")
     url = vacancy.get("alternate_url")
     salary_info = vacancy.get("salary")
@@ -14,17 +14,21 @@ def parse_vacancy(vacancy: Dict[str, Any]) -> Dict[str, Any]:
         "title": title,
         "salary_from": salary_from,
         "salary_to": salary_to,
-        "url": url
+        "url": url,
     }
 
 def process_vacancies(vacancies: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """ Обрабатывает список вакансий, преобразуя каждую к требуемому формату """
+    """Обрабатывает список вакансий, преобразуя каждую к требуемому формату"""
     return [parse_vacancy(vacancy) for vacancy in vacancies]
 
-def filter_vacancies_by_keyword(vacancies: List[Dict[str, Any]], keyword: str) -> List[Dict[str, Any]]:
-    """ Фильтрация вакансий по заданному слову """
+
+def filter_vacancies_by_keyword(
+    vacancies: List[Dict[str, Any]], keyword: str
+) -> List[Dict[str, Any]]:
+    """Фильтрация вакансий по заданному слову"""
     keyword_lower = keyword.lower()
     return [
-        vacancy for vacancy in vacancies
+        vacancy
+        for vacancy in vacancies
         if vacancy.get("title") and keyword_lower in vacancy.get("title").lower()
     ]
