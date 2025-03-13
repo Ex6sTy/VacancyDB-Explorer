@@ -1,110 +1,109 @@
-from unittest import result
-
 import psycopg2
-from psycopg2.extensions import connection
-from typing import List, Dict, Any, Optional
+from config import config
+from typing import List, Tuple, Optional
 
 class DBManager:
-    """ Класс для управления базой данных PostgreSQL """
+    """Класс для управления базой данных PostgreSQL."""
 
-    def __init__(self, dsn: str) -> None:
-        """ Инициализация соединения с базой данных """
-        self.connection = psycopg2.connect(dsn)
-        self.connection.autocommit = True
+    def __init__(self, database_name: str) -> None:
+        """
+        Инициализирует объект DBManager.
 
-    def create_tables(self) -> None:
-        """ Создает таблицы организаций и вакансий """
-        with self.connection.cursor() as cursor:
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS companies (
-                    id SERIAL PRIMARY KEY,
-                    employer_id INTEGER UNIQUE,
-                    name TEXT NOT NULL,
-                );
+        :param database_name: Имя базы данных для подключения.
+        """
+        self.conn = psycopg2.connect(dbname=database_name, **config())
+
+    def get_companies_and_vacancies_count(self) -> List[Tuple[str, int]]:
+        """
+        Получает список всех компаний и количество вакансий у каждой компании.
+
+        :return: Список кортежей вида (название компании, количество вакансий).
+        """
+        with self.conn.cursor() as cur:
+            cur.execute("""
+                SELECT employers.name, COUNT(vacancies.vacancy_id)
+                FROM employers
+                LEFT JOIN vacancies ON employers.employer_id = vacancies.employer_id
+                GROUP BY employers.name
             """)
-            # Создание таблицы вакансий с внешним ключом на компании
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS vacancies (
-                    id SERIAL PRIMARY KEY,
-                    company_id INTEGER REFERENCES companies(id),
-                    title TEXT NOT NULL,
-                    salary_from INTEGER,
-                    salary_to INTEGER,
-                    url TEXT
-                );
-                """)
+            return cur.fetchall()
 
-    def get_companies_and_vacancies_count(self) -> List[Dict[str, Any]]:
-        """ Возвращает список всех компаний и количество вакансий для данной """
-        with self.connection.cursor() as cursor:
-            cursor.execute("""
-                SELECT c.name, COUNT(v.id) as vacancies_count
-                FROM companies c
-                LEFT JOIN vacancies v ON c.id = v.company_id
-                GROUP BY c.id;
-            """)
-            result = cursor.fetchall()
-        return [{"company": row[0], "vacancies_count": row[1]} for row in result]
+    def get_all_vacancies(self) -> List[Tuple[str, str, Optional[int], Optional[int], str]]:
+        """
+        Получает список всех вакансий с указанием названия компании, названия вакансии, зарплаты и ссылки на вакансию.
 
-    def get_all_vacancies(self) -> List[Dict[str, Any]]:
-        """ Возвращает список ввсех вакансий с указанием компании, названия вакансии, зарплаты и URL """
-        with self.connection.cursor() as cursor:
-            cursor.execute("""
-                SELECT c.name, v.title, v.salary_from, v.salary_to, v.url
-                FROM vacancies v
-                JOIN companies c ON v.company_id = c.id;
+        :return: Список кортежей вида (название компании, название вакансии, зарплата от, зарплата до, ссылка на вакансию).
+        """
+        with self.conn.cursor() as cur:
+            cur.execute("""
+                SELECT employers.name, vacancies.title, vacancies.salary_from, vacancies.salary_to, vacancies.url
+                FROM vacancies
+                JOIN employers ON vacancies.employer_id = employers.employer_id
             """)
-            result = cursor.fetchall()
-        return [
-            {"company": row[0], "title": row[1], "salary_from": row[2], "salary_to": row[3], "url": row[4]}
-            for row in result
-        ]
+            return cur.fetchall()
 
     def get_avg_salary(self) -> Optional[float]:
-        """ Вычисляет среднюю зарплату по вакансиям """
-        with self.connection.cursor() as cursor:
-            cursor.execute("""
-                SELECT AVG((salary_from + salary_to) / 2.0)
+        """
+        Получает среднюю зарплату по всем вакансиям.
+
+        :return: Средняя зарплата (float) или None, если данные отсутствуют.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute("""
+                SELECT AVG((salary_from + salary_to) / 2)
                 FROM vacancies
-                WHERE salary_from IS NOT NULL AND salary_to IS NOT NULL;
+                WHERE salary_from IS NOT NULL AND salary_to IS NOT NULL
             """)
-            result = cursor.fetchone()
-        return result[0] if result and result[0] is not None else None
+            result = cur.fetchone()[0]
+            return result if result is not None else None
 
-    def get_vacancies_with_higher_salary(self) -> List[Dict[str, Any]]:
-        """ Возвращает список вакансий, у которых зарплата выше средней по всем вакансиям """
+    def get_vacancies_with_higher_salary(self) -> List[Tuple]:
+        """
+        Получает список всех вакансий, у которых зарплата выше средней по всем вакансиям.
+
+        :return: Список кортежей с информацией о вакансиях.
+        """
         avg_salary = self.get_avg_salary()
-        if avg_salary is None:
-            return []
-        with self.connection.cursor() as cursor:
-            cursor.execute("""
-                SELECT c.name, v.title, v.salary_from, v.salary_to, v.url
-                FROM vacancies v
-                JOIN companies c ON v.company_id = c.id
-                WHERE ((salary_from + salary_to) / 2.0) > %s;
+        with self.conn.cursor() as cur:
+            cur.execute("""
+                SELECT * FROM vacancies
+                WHERE (salary_from + salary_to) / 2 > %s
             """, (avg_salary,))
-            result = cursor.fetchall()
-        return [
-            {"company": row[0], "title": row[1], "salary_from": row[2], "salary_to": row[3], "url": row[4]}
-            for row in result
-        ]
+            return cur.fetchall()
 
-    def get_vacancies_with_keyword(self, keyword: str) -> List[Dict[str, Any]]:
-        """ Возвращает список вакансий по ключевому слову """
-        pattern = f"%{keyword}%"
-        with self.connection.cursor() as cursor:
-            cursor.execute("""
-                SELECT c.name, v.title, v.salary_from, v.salary_to, v.url
-                FROM vacancies v
-                JOIN companies c ON v.company_id = c.id
-                WHERE v.title ILIKE %s;
-            """, (pattern,))
-            result = cursor.fetchall()
-        return [
-            {"company": row[0], "title": row[1], "salary_from": row[2], "salary_to": row[3], "url": row[4]}
-            for row in result
-        ]
+    def get_vacancies_with_keyword(self, keyword: str) -> List[Tuple]:
+        """
+        Получает список всех вакансий, в названии которых содержатся переданные в метод слова.
+
+        :param keyword: Ключевое слово для поиска в названиях вакансий.
+        :return: Список кортежей с информацией о вакансиях.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute("""
+                SELECT * FROM vacancies
+                WHERE title ILIKE %s
+            """, (f'%{keyword}%',))
+            return cur.fetchall()
+
+    def get_vacancies_by_salary_and_keyword(self, salary: int, keyword: str) -> List[Tuple]:
+        """
+        Получает список вакансий, у которых зарплата выше или равна указанной,
+        и в названии которых содержится ключевое слово.
+
+        :param salary: Минимальная желаемая зарплата.
+        :param keyword: Ключевое слово для поиска в названиях вакансий.
+        :return: Список кортежей с информацией о вакансиях.
+        """
+        with self.conn.cursor() as cur:
+            cur.execute("""
+                SELECT employers.name, vacancies.title, vacancies.salary_from, vacancies.salary_to, vacancies.url
+                FROM vacancies
+                JOIN employers ON vacancies.employer_id = employers.employer_id
+                WHERE (vacancies.salary_from >= %s OR vacancies.salary_to >= %s)
+                AND vacancies.title ILIKE %s
+            """, (salary, salary, f'%{keyword}%'))
+            return cur.fetchall()
 
     def close(self) -> None:
-        """ Закрытие соединения с базой данных """
-        self.connection.close()
+        """Закрывает соединение с базой данных."""
+        self.conn.close()
